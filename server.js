@@ -20,6 +20,26 @@ app.get("/", (req, res) => {
 });
 
 app.get("/test-db", async (req, res) => {
+  app.get("/init-db", async (req, res) => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        nom VARCHAR(100),
+        email VARCHAR(100) UNIQUE NOT NULL,
+        telephone VARCHAR(20),
+        password_hash TEXT NOT NULL,
+        solde INTEGER DEFAULT 0,
+        role VARCHAR(20) DEFAULT 'user',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    res.json({ message: "Users table created successfully ✅" });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
   try {
     const result = await pool.query("SELECT NOW()");
     res.json({ success: true, time: result.rows[0] });
