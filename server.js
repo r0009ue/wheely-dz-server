@@ -10,9 +10,7 @@ app.use(express.json());
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false,
-  },
+  ssl: { rejectUnauthorized: false },
 });
 
 app.get("/", (req, res) => {
@@ -20,7 +18,15 @@ app.get("/", (req, res) => {
 });
 
 app.get("/test-db", async (req, res) => {
-  app.get("/init-db", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT NOW()");
+    res.json({ success: true, time: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get("/init-db", async (req, res) => {
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS users (
@@ -36,13 +42,6 @@ app.get("/test-db", async (req, res) => {
     `);
 
     res.json({ message: "Users table created successfully ✅" });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-  try {
-    const result = await pool.query("SELECT NOW()");
-    res.json({ success: true, time: result.rows[0] });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
