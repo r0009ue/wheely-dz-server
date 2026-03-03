@@ -158,6 +158,55 @@ app.get("/profile", authenticateToken, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// Bouton Mon Profil
+const profileBtn = document.getElementById("profileBtn");
+const profileModal = document.getElementById("profileModal");
+const closeProfileModal = document.getElementById("closeProfileModal");
+
+// Afficher le pop-up Profil
+profileBtn.addEventListener("click", () => {
+  profileModal.style.display = "block";
+  loadProfileData(); // Charger les données du profil
+});
+
+// Fermer le pop-up Profil
+closeProfileModal.addEventListener("click", () => {
+  profileModal.style.display = "none";
+});
+
+// Si l'utilisateur clique en dehors du pop-up, fermer le modal
+window.addEventListener("click", (event) => {
+  if (event.target === profileModal) {
+    profileModal.style.display = "none";
+  }
+});
+
+// Charger les données du profil
+async function loadProfileData() {
+  const token = localStorage.getItem("token");
+  if (!token) {
+    alert("Veuillez vous connecter");
+    return;
+  }
+
+  const response = await fetch("https://wheely-dz-server.onrender.com/profile", {
+    headers: { Authorization: "Bearer " + token },
+  });
+
+  const data = await response.json();
+
+  if (response.ok) {
+    document.getElementById("profileContent").innerHTML = `
+      <p><strong>Nom:</strong> ${data.nom}</p>
+      <p><strong>Email:</strong> ${data.email}</p>
+      <p><strong>Solde:</strong> ${data.solde} DA</p>
+      <p><strong>Abonnement:</strong> ${data.subscription_type || "Aucun abonnement"}</p>
+      <p><strong>Minutes restantes:</strong> ${data.subscription_minutes_left || 0} min</p>
+    `;
+  } else {
+    alert("Erreur lors du chargement du profil");
+  }
+}
 
 /* ================= DEPOSIT ================= */
 
@@ -177,24 +226,29 @@ app.post("/deposit", authenticateToken, async (req, res) => {
 });
 
 /* ================= RESERVE ================= */
-
 app.post("/reserve", authenticateToken, async (req, res) => {
-  try {
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const { duration } = req.body;
 
-    // Ajouter un montant par défaut (exemple: 70 DA)
-    const montant = 70;  // Ou définis-le en fonction de la durée ou du plan de location
-
-    await pool.query(
-      `INSERT INTO reservations (user_id, montant, code)
-       VALUES ($1, $2, $3)`,
-      [req.user.id, montant, code]
-    );
-
-    res.json({ code });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  if (!duration || duration <= 0) {
+    return res.status(400).json({ error: "Durée invalide" });
   }
+
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+
+  // Calculer le montant en fonction de la durée
+  let montant = 0;
+  if (duration === 70) montant = 70;  // 15 minutes
+  else if (duration === 150) montant = 150;  // 30 minutes
+  else if (duration === 220) montant = 220;  // 1 heure
+  else if (duration === 300) montant = 300;  // 2 heures
+
+  // Insérer la réservation avec le montant calculé
+  await pool.query(
+    `INSERT INTO reservations (user_id, montant, code) VALUES ($1, $2, $3)`,
+    [req.user.id, montant, code]
+  );
+
+  res.json({ code });
 });
 
 /* ================= UNLOCK ================= */
