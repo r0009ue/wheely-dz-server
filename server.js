@@ -9,17 +9,17 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-/* ================= ROOT ================= */
-
-app.get("/", (req, res) => {
-  res.send("Wheely DZ API Running 🚴");
-});
-
 /* ================= DATABASE ================= */
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
+});
+
+/* ================= ROOT ================= */
+
+app.get("/", (req, res) => {
+  res.send("Wheely DZ API Running 🚴");
 });
 
 /* ================= JWT ================= */
@@ -28,13 +28,10 @@ function authenticateToken(req, res, next) {
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.split(" ")[1];
 
-  if (!token)
-    return res.status(401).json({ error: "Token manquant" });
+  if (!token) return res.status(401).json({ error: "Token manquant" });
 
   jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-    if (err)
-      return res.status(403).json({ error: "Token invalide" });
-
+    if (err) return res.status(403).json({ error: "Token invalide" });
     req.user = user;
     next();
   });
@@ -52,7 +49,9 @@ app.get("/init-db", async (req, res) => {
         email VARCHAR(100) UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
         solde INTEGER DEFAULT 0,
-        role VARCHAR(20) DEFAULT 'user',
+        subscription_type VARCHAR(50),
+        subscription_expires TIMESTAMP,
+        subscription_minutes_left INTEGER DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
@@ -69,31 +68,6 @@ app.get("/init-db", async (req, res) => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
-    await pool.query(`
-  ALTER TABLE reservations
-  ADD COLUMN IF NOT EXISTS started_at TIMESTAMP;
-`);
-
-await pool.query(`
-  ALTER TABLE reservations
-  ADD COLUMN IF NOT EXISTS ended_at TIMESTAMP;
-`);
-
-    // Colonnes abonnement
-    await pool.query(`
-      ALTER TABLE users
-      ADD COLUMN IF NOT EXISTS subscription_type VARCHAR(50);
-    `);
-
-    await pool.query(`
-      ALTER TABLE users
-      ADD COLUMN IF NOT EXISTS subscription_expires TIMESTAMP;
-    `);
-
-    await pool.query(`
-      ALTER TABLE users
-      ADD COLUMN IF NOT EXISTS subscription_minutes_left INTEGER DEFAULT 0;
-    `);
 
     res.json({ message: "Database ready ✅" });
 
@@ -106,6 +80,7 @@ await pool.query(`
 
 app.post("/register", async (req, res) => {
   try {
+
     const { nom, email, password } = req.body;
 
     if (!nom || !email || !password)
@@ -177,238 +152,4 @@ app.post("/login", async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
-});
-
-/* ================= PROFILE ================= */
-
-app.get("/profile", authenticateToken, async (req, res) => {
-  try {
-
-    const user = await pool.query(
-      `SELECT nom,email,solde,
-              subscription_type,
-              subscription_minutes_left,
-              subscription_expires
-       FROM users WHERE id=$1`,
-      [req.user.id]
-    );
-
-    res.json(user.rows[0]);
-
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/* ================= BUY SUBSCRIPTION ================= */
-
-app.post("/buy-subscription", authenticateToken, async (req, res) => {
-  try {
-
-    const { type } = req.body;
-
-    let price = 0;
-    let minutes = 0;
-
-    if (type === "student") {
-      price = 1200;
-      minutes = 120;
-    }
-
-    if (type === "premium") {
-      price = 2500;
-      minutes = 240;
-    }
-
-    const user = await pool.query(
-      "SELECT solde FROM users WHERE id=$1",
-      [req.user.id]
-    );
-
-    if (user.rows[0].solde < price)
-      return res.status(400).json({ error: "Solde insuffisant" });
-
-    await pool.query(
-      `UPDATE users
-       SET solde = solde - $1,
-           subscription_type=$2,
-           subscription_expires = NOW() + INTERVAL '30 days',
-           subscription_minutes_left=$3
-       WHERE id=$4`,
-      [price, type, minutes, req.user.id]
-    );
-
-    res.json({ message: "Abonnement activé ✅" });
-
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/* ================= RESERVE ================= */
-
-app.post("/reserve", authenticateToken, async (req, res) => {
-  try {
-
-    const active = await pool.query(
-      `SELECT * FROM reservations
-       WHERE user_id=$1 AND ended_at IS NULL AND started_at IS NOT NULL`,
-      [req.user.id]
-    );
-
-    if (active.rows.length > 0)
-      return res.status(400).json({ error: "Course déjà active" });
-
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-
-    await pool.query(
-      `INSERT INTO reservations (user_id,montant,code)
-       VALUES ($1,$2,$3)`,
-      [req.user.id, 0, code]
-    );
-
-    res.json({ code });
-
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/* ================= UNLOCK ================= */
-
-app.post("/unlock", authenticateToken, async (req, res) => {
-  try {
-
-    const { code } = req.body;
-
-    const reservation = await pool.query(
-      `SELECT * FROM reservations
-       WHERE user_id=$1 AND code=$2 AND used=false`,
-      [req.user.id, code]
-    );
-
-    if (reservation.rows.length === 0)
-      return res.status(400).json({ error: "Code invalide" });
-
-    await pool.query(
-      `UPDATE reservations
-       SET used=true, started_at=NOW()
-       WHERE id=$1`,
-      [reservation.rows[0].id]
-    );
-
-    res.json({ message: "Vélo déverrouillé 🚴" });
-
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/* ================= END RIDE ================= */
-
-app.post("/end-ride", authenticateToken, async (req, res) => {
-  try {
-
-    const ride = await pool.query(
-      `SELECT * FROM reservations
-       WHERE user_id=$1
-       AND started_at IS NOT NULL
-       AND ended_at IS NULL
-       ORDER BY started_at DESC
-       LIMIT 1`,
-      [req.user.id]
-    );
-
-    if (ride.rows.length === 0)
-      return res.status(400).json({ error: "Aucune course active" });
-
-    const start = ride.rows[0].started_at;
-    const duration = Math.max(
-      1,
-      Math.floor((new Date() - start) / 60000)
-    );
-
-    const user = await pool.query(
-      `SELECT solde,
-              subscription_type,
-              subscription_minutes_left,
-              subscription_expires
-       FROM users WHERE id=$1`,
-      [req.user.id]
-    );
-
-    let solde = user.rows[0].solde;
-    let minutesLeft = user.rows[0].subscription_minutes_left;
-
-    let cost = duration * 5;
-
-    if (
-      user.rows[0].subscription_type &&
-      user.rows[0].subscription_expires &&
-      new Date(user.rows[0].subscription_expires) > new Date()
-    ) {
-
-      if (minutesLeft >= duration) {
-
-        minutesLeft -= duration;
-
-        await pool.query(
-          `UPDATE users
-           SET subscription_minutes_left=$1
-           WHERE id=$2`,
-          [minutesLeft, req.user.id]
-        );
-
-        cost = 0;
-
-      } else {
-
-        const extra = duration - minutesLeft;
-        cost = extra * 5;
-
-        await pool.query(
-          `UPDATE users
-           SET subscription_minutes_left=0
-           WHERE id=$1`,
-          [req.user.id]
-        );
-      }
-    }
-
-    if (cost > 0) {
-      if (solde < cost)
-        return res.status(400).json({ error: "Solde insuffisant" });
-
-      await pool.query(
-        `UPDATE users
-         SET solde = solde - $1
-         WHERE id=$2`,
-        [cost, req.user.id]
-      );
-    }
-
-    await pool.query(
-      `UPDATE reservations
-       SET ended_at=NOW()
-       WHERE id=$1`,
-      [ride.rows[0].id]
-    );
-
-    res.json({
-      message: "Course terminée",
-      duration,
-      cost
-    });
-
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/* ================= START SERVER ================= */
-
-const PORT = process.env.PORT || 10000;
-
-app.listen(PORT, () => {
-  console.log("Server running on port " + PORT);
 });
