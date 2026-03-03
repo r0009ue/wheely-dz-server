@@ -64,6 +64,20 @@ app.get("/init-db", async (req, res) => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
+    await pool.query(`
+  ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS subscription_type VARCHAR(50);
+`);
+
+await pool.query(`
+  ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS subscription_expires TIMESTAMP;
+`);
+
+await pool.query(`
+  ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS subscription_minutes_left INTEGER DEFAULT 0;
+`);
 
     res.json({ message: "Database ready ✅" });
 
