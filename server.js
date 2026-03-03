@@ -10,24 +10,33 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// ================= DATABASE =================
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
 });
 
-// ================= JWT =================
+// ================= JWT MIDDLEWARE =================
 function authenticateToken(req, res, next) {
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.split(" ")[1];
 
-  if (!token) return res.status(401).json({ error: "Token manquant" });
+  if (!token)
+    return res.status(401).json({ error: "Token manquant" });
 
   jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ error: "Token invalide" });
+    if (err)
+      return res.status(403).json({ error: "Token invalide" });
+
     req.user = user;
     next();
   });
 }
+
+// ================= ROOT =================
+app.get("/", (req, res) => {
+  res.json({ message: "Wheely DZ API Running 🚴" });
+});
 
 // ================= INIT DB =================
 app.get("/init-db", async (req, res) => {
@@ -37,7 +46,6 @@ app.get("/init-db", async (req, res) => {
         id SERIAL PRIMARY KEY,
         nom VARCHAR(100),
         email VARCHAR(100) UNIQUE NOT NULL,
-        telephone VARCHAR(20),
         password_hash TEXT NOT NULL,
         solde INTEGER DEFAULT 0,
         role VARCHAR(20) DEFAULT 'user',
@@ -56,13 +64,12 @@ app.get("/init-db", async (req, res) => {
       );
     `);
 
-    // 🔥 IMPORTANT SI TABLE DÉJÀ CRÉÉE
     await pool.query(`
       ALTER TABLE reservations
       ADD COLUMN IF NOT EXISTS used BOOLEAN DEFAULT false;
     `);
 
-    res.json({ message: "Tables mises à jour ✅" });
+    res.json({ message: "Tables prêtes ✅" });
 
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -73,6 +80,10 @@ app.get("/init-db", async (req, res) => {
 app.post("/register", async (req, res) => {
   try {
     const { nom, email, password } = req.body;
+
+    if (!nom || !email || !password) {
+      return res.status(400).json({ error: "Champs requis manquants" });
+    }
 
     const userExist = await pool.query(
       "SELECT * FROM users WHERE email = $1",
@@ -142,27 +153,36 @@ app.post("/login", async (req, res) => {
 
 // ================= PROFILE =================
 app.get("/profile", authenticateToken, async (req, res) => {
-  const user = await pool.query(
-    "SELECT id, nom, email, solde FROM users WHERE id = $1",
-    [req.user.id]
-  );
+  try {
+    const user = await pool.query(
+      "SELECT id, nom, email, solde FROM users WHERE id = $1",
+      [req.user.id]
+    );
 
-  res.json(user.rows[0]);
+    res.json(user.rows[0]);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // ================= DEPOSIT =================
 app.post("/deposit", authenticateToken, async (req, res) => {
-  const { amount } = req.body;
+  try {
+    const { amount } = req.body;
 
-  if (!amount || amount <= 0)
-    return res.status(400).json({ error: "Montant invalide" });
+    if (!amount || amount <= 0)
+      return res.status(400).json({ error: "Montant invalide" });
 
-  await pool.query(
-    "UPDATE users SET solde = solde + $1 WHERE id = $2",
-    [amount, req.user.id]
-  );
+    await pool.query(
+      "UPDATE users SET solde = solde + $1 WHERE id = $2",
+      [amount, req.user.id]
+    );
 
-  res.json({ message: "Solde mis à jour ✅" });
+    res.json({ message: "Solde mis à jour ✅" });
+
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // ================= RESERVE =================
@@ -179,6 +199,9 @@ app.post("/reserve", authenticateToken, async (req, res) => {
       "SELECT solde FROM users WHERE id = $1",
       [req.user.id]
     );
+
+    if (user.rows.length === 0)
+      return res.status(404).json({ error: "Utilisateur introuvable" });
 
     if (user.rows[0].solde < montant)
       return res.status(400).json({ error: "Solde insuffisant" });
@@ -208,14 +231,14 @@ app.post("/reserve", authenticateToken, async (req, res) => {
     client.release();
   }
 });
+
 // ================= UNLOCK =================
 app.post("/unlock", authenticateToken, async (req, res) => {
   try {
     const { code } = req.body;
 
-    if (!code) {
+    if (!code)
       return res.status(400).json({ error: "Code requis" });
-    }
 
     const reservation = await pool.query(
       `SELECT * FROM reservations 
@@ -231,17 +254,21 @@ app.post("/unlock", authenticateToken, async (req, res) => {
       });
     }
 
-    // Marquer comme utilisé
     await pool.query(
       "UPDATE reservations SET used = true WHERE id = $1",
       [reservation.rows[0].id]
     );
 
-    res.json({
-      message: "🚴 Vélo déverrouillé avec succès !"
-    });
+    res.json({ message: "🚴 Vélo déverrouillé avec succès !" });
 
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+});
+
+// ================= START SERVER =================
+const PORT = process.env.PORT || 10000;
+
+app.listen(PORT, () => {
+  console.log("Server running on port " + PORT);
 });
