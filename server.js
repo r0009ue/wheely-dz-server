@@ -72,6 +72,14 @@ app.get("/init-db", async (req, res) => {
       ALTER TABLE reservations
       ADD COLUMN IF NOT EXISTS started_at TIMESTAMP;
       `);
+    ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS subscription_type VARCHAR(50);
+      
+      ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS subscription_expires TIMESTAMP;
+      
+      ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS subscription_minutes_left INTEGER DEFAULT 0;
 
     res.json({ message: "Tables prêtes ✅" });
 
@@ -325,8 +333,7 @@ app.post("/end-ride", authenticateToken, async (req, res) => {
 
     const ride = await pool.query(
       `SELECT * FROM reservations 
-       WHERE user_id = $1 
-       AND used = true 
+       WHERE user_id=$1 
        AND started_at IS NOT NULL
        ORDER BY started_at DESC
        LIMIT 1`,
@@ -339,18 +346,125 @@ app.post("/end-ride", authenticateToken, async (req, res) => {
     const startTime = ride.rows[0].started_at;
     const now = new Date();
 
-    const durationMinutes =
-      Math.floor((now - startTime) / 60000);
+    const durationMinutes = Math.max(
+      1,
+      Math.floor((now - startTime) / 60000)
+    );
+
+    const user = await pool.query(
+      `SELECT subscription_type,
+              subscription_minutes_left,
+              subscription_expires,
+              solde
+       FROM users
+       WHERE id=$1`,
+      [req.user.id]
+    );
+
+    let remainingMinutes = user.rows[0].subscription_minutes_left;
+    let solde = user.rows[0].solde;
+
+    // Si abonnement actif
+    if (
+      user.rows[0].subscription_type &&
+      new Date(user.rows[0].subscription_expires) > new Date()
+    ) {
+
+      if (remainingMinutes >= durationMinutes) {
+
+        remainingMinutes -= durationMinutes;
+
+        await pool.query(
+          `UPDATE users
+           SET subscription_minutes_left=$1
+           WHERE id=$2`,
+          [remainingMinutes, req.user.id]
+        );
+
+      } else {
+
+        const extraMinutes = durationMinutes - remainingMinutes;
+        const extraCost = extraMinutes * 5; // 5 DA/min
+
+        if (solde < extraCost)
+          return res.status(400).json({ error: "Solde insuffisant pour dépassement" });
+
+        await pool.query(
+          `UPDATE users
+           SET solde = solde - $1,
+               subscription_minutes_left = 0
+           WHERE id=$2`,
+          [extraCost, req.user.id]
+        );
+      }
+
+    } else {
+
+      const cost = durationMinutes * 5;
+
+      if (solde < cost)
+        return res.status(400).json({ error: "Solde insuffisant" });
+
+      await pool.query(
+        `UPDATE users
+         SET solde = solde - $1
+         WHERE id=$2`,
+        [cost, req.user.id]
+      );
+    }
 
     res.json({
-      message: "Course terminée",
+      message: "Course terminée ✅",
       duration: durationMinutes
     });
 
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 
+});
+// ================= BUY SUBSCRIPTION =================
+app.post("/buy-subscription", authenticateToken, async (req, res) => {
+  try {
+
+    const { type } = req.body;
+
+    let price = 0;
+    let minutes = 0;
+
+    if (type === "student") {
+      price = 1200;
+      minutes = 120; // 2h par jour × 30j simplifié
+    }
+
+    if (type === "premium") {
+      price = 2500;
+      minutes = 240;
+    }
+
+    const user = await pool.query(
+      "SELECT solde FROM users WHERE id=$1",
+      [req.user.id]
+    );
+
+    if (user.rows[0].solde < price)
+      return res.status(400).json({ error: "Solde insuffisant" });
+
+    await pool.query(
+      `UPDATE users 
+       SET solde = solde - $1,
+           subscription_type = $2,
+           subscription_expires = NOW() + INTERVAL '30 days',
+           subscription_minutes_left = $3
+       WHERE id=$4`,
+      [price, type, minutes, req.user.id]
+    );
+
+    res.json({ message: "Abonnement activé ✅" });
+
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.listen(PORT, () => {
