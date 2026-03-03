@@ -15,19 +15,26 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false },
 });
 
+// ================= JWT MIDDLEWARE =================
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers["authorization"];
+  const token = authHeader && authHeader.split(" ")[1];
+
+  if (!token) return res.status(401).json({ error: "Token manquant" });
+
+  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
+    if (err) return res.status(403).json({ error: "Token invalide" });
+    req.user = user;
+    next();
+  });
+}
+
+// ================= ROOT =================
 app.get("/", (req, res) => {
   res.json({ message: "Wheely DZ API Running 🚴" });
 });
 
-app.get("/test-db", async (req, res) => {
-  try {
-    const result = await pool.query("SELECT NOW()");
-    res.json({ success: true, time: result.rows[0] });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
+// ================= INIT DB =================
 app.get("/init-db", async (req, res) => {
   try {
     await pool.query(`
@@ -43,12 +50,21 @@ app.get("/init-db", async (req, res) => {
       );
     `);
 
-    res.json({ message: "Users table created successfully ✅" });
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS reservations (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id),
+        montant INTEGER NOT NULL,
+        code VARCHAR(6),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    res.json({ message: "Tables créées ✅" });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
-
 
 // ================= REGISTER =================
 app.post("/register", async (req, res) => {
@@ -83,7 +99,6 @@ app.post("/register", async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-
 
 // ================= LOGIN =================
 app.post("/login", async (req, res) => {
@@ -127,6 +142,83 @@ app.post("/login", async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// ================= PROFILE =================
+app.get("/profile", authenticateToken, async (req, res) => {
+  try {
+    const user = await pool.query(
+      "SELECT id, nom, email, solde, role FROM users WHERE id = $1",
+      [req.user.id]
+    );
+
+    res.json(user.rows[0]);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ================= DEPOSIT =================
+app.post("/deposit", authenticateToken, async (req, res) => {
+  try {
+    const { amount } = req.body;
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ error: "Montant invalide" });
+    }
+
+    await pool.query(
+      "UPDATE users SET solde = solde + $1 WHERE id = $2",
+      [amount, req.user.id]
+    );
+
+    res.json({ message: "Solde mis à jour ✅" });
+
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ================= RESERVE =================
+app.post("/reserve", authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { montant } = req.body;
+
+    const user = await client.query(
+      "SELECT solde FROM users WHERE id = $1",
+      [req.user.id]
+    );
+
+    if (user.rows[0].solde < montant) {
+      return res.status(400).json({ error: "Solde insuffisant" });
+    }
+
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+
+    await client.query("BEGIN");
+
+    await client.query(
+      "UPDATE users SET solde = solde - $1 WHERE id = $2",
+      [montant, req.user.id]
+    );
+
+    await client.query(
+      "INSERT INTO reservations (user_id, montant, code) VALUES ($1, $2, $3)",
+      [req.user.id, montant, code]
+    );
+
+    await client.query("COMMIT");
+
+    res.json({ message: "Réservation confirmée ✅", code });
+
+  } catch (error) {
+    await client.query("ROLLBACK");
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
   }
 });
 
