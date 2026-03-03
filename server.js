@@ -315,60 +315,6 @@ app.get("/my-reservations", authenticateToken, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-// ================= HISTORY =================
-const historyModal = document.getElementById("historyModal");
-const closeHistoryModal = document.getElementById("closeHistoryModal");
-const historyContent = document.getElementById("historyContent");
-
-profileBtn.addEventListener("click", async function () {
-    const token = localStorage.getItem("token");
-
-    if (!token) {
-        alert("Veuillez vous connecter");
-        return;
-    }
-
-    historyModal.style.display = "block";
-
-    try {
-        const response = await fetch(API + "/my-reservations", {
-            headers: { Authorization: "Bearer " + token }
-        });
-
-        const data = await response.json();
-
-        if (response.ok) {
-            if (data.length === 0) {
-                historyContent.innerHTML = "<p>Aucune réservation trouvée.</p>";
-                return;
-            }
-
-            historyContent.innerHTML = data.map(res => `
-                <div style="padding:10px; border-bottom:1px solid #eee;">
-                    <strong>Code:</strong> ${res.code} <br>
-                    <strong>Montant:</strong> ${res.montant} DA <br>
-                    <strong>Utilisé:</strong> ${res.used ? "Oui" : "Non"} <br>
-                    <strong>Date:</strong> ${new Date(res.created_at).toLocaleString()}
-                </div>
-            `).join("");
-        } else {
-            historyContent.innerHTML = "<p>Erreur lors du chargement</p>";
-        }
-
-    } catch (error) {
-        historyContent.innerHTML = "<p>Erreur serveur</p>";
-    }
-});
-
-closeHistoryModal.addEventListener("click", function () {
-    historyModal.style.display = "none";
-});
-
-window.addEventListener("click", function (e) {
-    if (e.target === historyModal) {
-        historyModal.style.display = "none";
-    }
-});
 
 app.listen(PORT, () => {
   console.log("Server running on port " + PORT);
