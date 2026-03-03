@@ -200,7 +200,30 @@ app.post("/reserve", authenticateToken, async (req, res) => {
     client.release();
   }
 });
+// ================= UNLOCK =================
+app.post("/unlock", authenticateToken, async (req, res) => {
+  try {
+    const { code } = req.body;
 
+    if (!code) {
+      return res.status(400).json({ error: "Code requis" });
+    }
+
+    const reservation = await pool.query(
+      "SELECT * FROM reservations WHERE code = $1 AND user_id = $2",
+      [code, req.user.id]
+    );
+
+    if (reservation.rows.length === 0) {
+      return res.status(400).json({ error: "Code invalide" });
+    }
+
+    res.json({ message: "Vélo déverrouillé 🚴" });
+
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 app.listen(process.env.PORT || 10000, () => {
   console.log("Server running");
 });
