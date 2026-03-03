@@ -41,7 +41,6 @@ function authenticateToken(req, res, next) {
 
 app.get("/init-db", async (req, res) => {
   try {
-
     await pool.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
@@ -70,7 +69,6 @@ app.get("/init-db", async (req, res) => {
     `);
 
     res.json({ message: "Database ready ✅" });
-
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -80,11 +78,7 @@ app.get("/init-db", async (req, res) => {
 
 app.post("/register", async (req, res) => {
   try {
-
     const { nom, email, password } = req.body;
-
-    if (!nom || !email || !password)
-      return res.status(400).json({ error: "Champs manquants" });
 
     const exist = await pool.query(
       "SELECT * FROM users WHERE email=$1",
@@ -104,7 +98,6 @@ app.post("/register", async (req, res) => {
     );
 
     res.json({ user: user.rows[0] });
-
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -114,7 +107,6 @@ app.post("/register", async (req, res) => {
 
 app.post("/login", async (req, res) => {
   try {
-
     const { email, password } = req.body;
 
     const user = await pool.query(
@@ -148,8 +140,120 @@ app.post("/login", async (req, res) => {
         solde: user.rows[0].solde
       }
     });
-
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+/* ================= PROFILE ================= */
+
+app.get("/profile", authenticateToken, async (req, res) => {
+  try {
+    const user = await pool.query(
+      "SELECT nom,email,solde FROM users WHERE id=$1",
+      [req.user.id]
+    );
+    res.json(user.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= DEPOSIT ================= */
+
+app.post("/deposit", authenticateToken, async (req, res) => {
+  try {
+    const { amount } = req.body;
+
+    await pool.query(
+      "UPDATE users SET solde = solde + $1 WHERE id = $2",
+      [amount, req.user.id]
+    );
+
+    res.json({ message: "Solde mis à jour" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= RESERVE ================= */
+
+app.post("/reserve", authenticateToken, async (req, res) => {
+  try {
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+
+    await pool.query(
+      `INSERT INTO reservations (user_id,code)
+       VALUES ($1,$2)`,
+      [req.user.id, code]
+    );
+
+    res.json({ code });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= UNLOCK ================= */
+
+app.post("/unlock", authenticateToken, async (req, res) => {
+  try {
+    const { code } = req.body;
+
+    await pool.query(
+      `UPDATE reservations
+       SET used=true, started_at=NOW()
+       WHERE user_id=$1 AND code=$2`,
+      [req.user.id, code]
+    );
+
+    res.json({ message: "Vélo déverrouillé 🚴" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= END RIDE ================= */
+
+app.post("/end-ride", authenticateToken, async (req, res) => {
+  try {
+    const ride = await pool.query(
+      `SELECT * FROM reservations
+       WHERE user_id=$1 AND ended_at IS NULL
+       ORDER BY started_at DESC LIMIT 1`,
+      [req.user.id]
+    );
+
+    if (ride.rows.length === 0)
+      return res.status(400).json({ error: "Aucune course active" });
+
+    const start = ride.rows[0].started_at;
+    const duration = Math.max(
+      1,
+      Math.floor((new Date() - start) / 60000)
+    );
+
+    await pool.query(
+      `UPDATE reservations SET ended_at=NOW()
+       WHERE id=$1`,
+      [ride.rows[0].id]
+    );
+
+    await pool.query(
+      `UPDATE users SET solde = solde - $1
+       WHERE id=$2`,
+      [duration * 5, req.user.id]
+    );
+
+    res.json({ duration });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= START ================= */
+
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => {
+  console.log("Server running on port " + PORT);
 });
