@@ -1,6 +1,8 @@
 const express = require("express");
 const cors = require("cors");
 const { Pool } = require("pg");
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
 require("dotenv").config();
 
 const app = express();
@@ -40,8 +42,12 @@ app.get("/init-db", async (req, res) => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
-const bcrypt = require("bcrypt");
-const jwt = require("jsonwebtoken");
+
+    res.json({ message: "Users table created successfully ✅" });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 
 // ================= REGISTER =================
@@ -119,11 +125,6 @@ app.post("/login", async (req, res) => {
         role: user.rows[0].role,
       },
     });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-    res.json({ message: "Users table created successfully ✅" });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
