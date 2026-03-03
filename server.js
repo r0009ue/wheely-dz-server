@@ -15,7 +15,7 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false },
 });
 
-// ================= JWT MIDDLEWARE =================
+// ================= JWT =================
 function authenticateToken(req, res, next) {
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.split(" ")[1];
@@ -28,11 +28,6 @@ function authenticateToken(req, res, next) {
     next();
   });
 }
-
-// ================= ROOT =================
-app.get("/", (req, res) => {
-  res.json({ message: "Wheely DZ API Running 🚴" });
-});
 
 // ================= INIT DB =================
 app.get("/init-db", async (req, res) => {
@@ -48,15 +43,6 @@ app.get("/init-db", async (req, res) => {
         role VARCHAR(20) DEFAULT 'user',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-    `);
-    await pool.query(`
-    CREATE TABLE IF NOT EXISTS reservations (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id),
-        amount INTEGER NOT NULL,
-        code VARCHAR(10) NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
     `);
 
     await pool.query(`
@@ -78,11 +64,7 @@ app.get("/init-db", async (req, res) => {
 // ================= REGISTER =================
 app.post("/register", async (req, res) => {
   try {
-    const { nom, email, telephone, password } = req.body;
-
-    if (!nom || !email || !password) {
-      return res.status(400).json({ error: "Champs obligatoires manquants" });
-    }
+    const { nom, email, password } = req.body;
 
     const userExist = await pool.query(
       "SELECT * FROM users WHERE email = $1",
@@ -96,14 +78,12 @@ app.post("/register", async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const newUser = await pool.query(
-      "INSERT INTO users (nom, email, telephone, password_hash) VALUES ($1, $2, $3, $4) RETURNING id, nom, email, solde, role",
-      [nom, email, telephone, hashedPassword]
+      "INSERT INTO users (nom, email, password_hash) VALUES ($1, $2, $3) RETURNING id, nom, email, solde, role",
+      [nom, email, hashedPassword]
     );
 
-    res.status(201).json({
-      message: "Utilisateur créé ✅",
-      user: newUser.rows[0],
-    });
+    res.status(201).json({ user: newUser.rows[0] });
+
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -119,18 +99,16 @@ app.post("/login", async (req, res) => {
       [email]
     );
 
-    if (user.rows.length === 0) {
+    if (user.rows.length === 0)
       return res.status(400).json({ error: "Utilisateur introuvable" });
-    }
 
     const validPassword = await bcrypt.compare(
       password,
       user.rows[0].password_hash
     );
 
-    if (!validPassword) {
+    if (!validPassword)
       return res.status(400).json({ error: "Mot de passe incorrect" });
-    }
 
     const token = jwt.sign(
       { id: user.rows[0].id, role: user.rows[0].role },
@@ -139,7 +117,6 @@ app.post("/login", async (req, res) => {
     );
 
     res.json({
-      message: "Connexion réussie ✅",
       token,
       user: {
         id: user.rows[0].id,
@@ -149,6 +126,7 @@ app.post("/login", async (req, res) => {
         role: user.rows[0].role,
       },
     });
+
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -156,37 +134,27 @@ app.post("/login", async (req, res) => {
 
 // ================= PROFILE =================
 app.get("/profile", authenticateToken, async (req, res) => {
-  try {
-    const user = await pool.query(
-      "SELECT id, nom, email, solde, role FROM users WHERE id = $1",
-      [req.user.id]
-    );
+  const user = await pool.query(
+    "SELECT id, nom, email, solde FROM users WHERE id = $1",
+    [req.user.id]
+  );
 
-    res.json(user.rows[0]);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+  res.json(user.rows[0]);
 });
 
 // ================= DEPOSIT =================
 app.post("/deposit", authenticateToken, async (req, res) => {
-  try {
-    const { amount } = req.body;
+  const { amount } = req.body;
 
-    if (!amount || amount <= 0) {
-      return res.status(400).json({ error: "Montant invalide" });
-    }
+  if (!amount || amount <= 0)
+    return res.status(400).json({ error: "Montant invalide" });
 
-    await pool.query(
-      "UPDATE users SET solde = solde + $1 WHERE id = $2",
-      [amount, req.user.id]
-    );
+  await pool.query(
+    "UPDATE users SET solde = solde + $1 WHERE id = $2",
+    [amount, req.user.id]
+  );
 
-    res.json({ message: "Solde mis à jour ✅" });
-
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+  res.json({ message: "Solde mis à jour ✅" });
 });
 
 // ================= RESERVE =================
@@ -196,22 +164,16 @@ app.post("/reserve", authenticateToken, async (req, res) => {
   try {
     const { montant } = req.body;
 
-    if (!montant || montant <= 0) {
+    if (!montant || montant <= 0)
       return res.status(400).json({ error: "Montant invalide" });
-    }
 
     const user = await client.query(
       "SELECT solde FROM users WHERE id = $1",
       [req.user.id]
     );
 
-    if (user.rows.length === 0) {
-      return res.status(404).json({ error: "Utilisateur introuvable" });
-    }
-
-    if (user.rows[0].solde < montant) {
+    if (user.rows[0].solde < montant)
       return res.status(400).json({ error: "Solde insuffisant" });
-    }
 
     const code = Math.floor(100000 + Math.random() * 900000).toString();
 
@@ -239,51 +201,6 @@ app.post("/reserve", authenticateToken, async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 10000;
-
-// ================= RESERVE =================
-app.post("/reserve", async (req, res) => {
-  try {
-    const token = req.headers.authorization?.split(" ")[1];
-    if (!token) return res.status(401).json({ error: "Non autorisé" });
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-    const { amount } = req.body;
-
-    const user = await pool.query(
-      "SELECT * FROM users WHERE id = $1",
-      [decoded.id]
-    );
-
-    if (user.rows.length === 0)
-      return res.status(404).json({ error: "Utilisateur introuvable" });
-
-    if (user.rows[0].solde < amount)
-      return res.status(400).json({ error: "Solde insuffisant" });
-
-    // Déduire solde
-    const newSolde = user.rows[0].solde - amount;
-
-    await pool.query(
-      "UPDATE users SET solde = $1 WHERE id = $2",
-      [newSolde, decoded.id]
-    );
-
-    // Générer code 6 chiffres
-    const code = Math.floor(100000 + Math.random() * 900000);
-
-    res.json({
-      message: "Réservation confirmée ✅",
-      code,
-      newSolde
-    });
-
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.listen(PORT, () => {
-  console.log("Server running on port " + PORT);
+app.listen(process.env.PORT || 10000, () => {
+  console.log("Server running");
 });
