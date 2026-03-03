@@ -178,7 +178,15 @@ app.post("/deposit", authenticateToken, async (req, res) => {
       [amount, req.user.id]
     );
 
-    res.json({ message: "Solde mis à jour ✅" });
+    const updatedUser = await pool.query(
+      "SELECT solde FROM users WHERE id = $1",
+      [req.user.id]
+    );
+
+    res.json({
+      message: "Paiement confirmé 💳",
+      newSolde: updatedUser.rows[0].solde
+    });
 
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -268,6 +276,45 @@ app.post("/unlock", authenticateToken, async (req, res) => {
 
 // ================= START SERVER =================
 const PORT = process.env.PORT || 10000;
+
+// ================= ADMIN STATS =================
+app.get("/admin/stats", authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== "admin") {
+      return res.status(403).json({ error: "Accès refusé" });
+    }
+
+    const users = await pool.query("SELECT COUNT(*) FROM users");
+    const reservations = await pool.query("SELECT COUNT(*) FROM reservations");
+    const revenue = await pool.query("SELECT COALESCE(SUM(montant),0) FROM reservations");
+
+    res.json({
+      totalUsers: users.rows[0].count,
+      totalReservations: reservations.rows[0].count,
+      totalRevenue: revenue.rows[0].coalesce
+    });
+
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+// ================= MY RESERVATIONS =================
+app.get("/my-reservations", authenticateToken, async (req, res) => {
+  try {
+    const reservations = await pool.query(
+      `SELECT montant, code, used, created_at
+       FROM reservations
+       WHERE user_id = $1
+       ORDER BY created_at DESC`,
+      [req.user.id]
+    );
+
+    res.json(reservations.rows);
+
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 app.listen(PORT, () => {
   console.log("Server running on port " + PORT);
