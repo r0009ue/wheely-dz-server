@@ -76,29 +76,24 @@ app.get("/init-db", async (req, res) => {
 
 /* ================= REGISTER ================= */
 
-app.post("/register", async (req, res) => {
+app.post("/reserve", authenticateToken, async (req, res) => {
   try {
-    const { nom, email, password } = req.body;
 
-    const exist = await pool.query(
-      "SELECT * FROM users WHERE email=$1",
-      [email]
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // montant fixe simple pour éviter bug
+    const montant = 70;
+
+    await pool.query(
+      `INSERT INTO reservations (user_id, montant, code)
+       VALUES ($1, $2, $3)`,
+      [req.user.id, montant, code]
     );
 
-    if (exist.rows.length > 0)
-      return res.status(400).json({ error: "Email déjà utilisé" });
+    res.json({ code });
 
-    const hash = await bcrypt.hash(password, 10);
-
-    const user = await pool.query(
-      `INSERT INTO users (nom,email,password_hash)
-       VALUES ($1,$2,$3)
-       RETURNING id,nom,email,solde`,
-      [nom, email, hash]
-    );
-
-    res.json({ user: user.rows[0] });
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
