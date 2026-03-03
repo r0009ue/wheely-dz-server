@@ -48,9 +48,6 @@ app.get("/init-db", async (req, res) => {
         email VARCHAR(100) UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
         solde INTEGER DEFAULT 0,
-        subscription_type VARCHAR(50),
-        subscription_expires TIMESTAMP,
-        subscription_minutes_left INTEGER DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
@@ -59,7 +56,7 @@ app.get("/init-db", async (req, res) => {
       CREATE TABLE IF NOT EXISTS reservations (
         id SERIAL PRIMARY KEY,
         user_id INTEGER REFERENCES users(id),
-        montant INTEGER DEFAULT 0,
+        montant INTEGER NOT NULL,
         code VARCHAR(6),
         used BOOLEAN DEFAULT false,
         started_at TIMESTAMP,
@@ -70,28 +67,38 @@ app.get("/init-db", async (req, res) => {
 
     res.json({ message: "Database ready ✅" });
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
 
 /* ================= REGISTER ================= */
 
-app.post("/reserve", authenticateToken, async (req, res) => {
+app.post("/register", async (req, res) => {
   try {
+    const { nom, email, password } = req.body;
 
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    if (!nom || !email || !password)
+      return res.status(400).json({ error: "Champs manquants" });
 
-    // montant fixe simple pour éviter bug
-    const montant = 70;
-
-    await pool.query(
-      `INSERT INTO reservations (user_id, montant, code)
-       VALUES ($1, $2, $3)`,
-      [req.user.id, montant, code]
+    const exist = await pool.query(
+      "SELECT * FROM users WHERE email=$1",
+      [email]
     );
 
-    res.json({ code });
+    if (exist.rows.length > 0)
+      return res.status(400).json({ error: "Email déjà utilisé" });
 
+    const hash = await bcrypt.hash(password, 10);
+
+    const user = await pool.query(
+      `INSERT INTO users (nom,email,password_hash)
+       VALUES ($1,$2,$3)
+       RETURNING id,nom,email,solde`,
+      [nom, email, hash]
+    );
+
+    res.json({ user: user.rows[0] });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -135,7 +142,9 @@ app.post("/login", async (req, res) => {
         solde: user.rows[0].solde
       }
     });
+
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -148,60 +157,13 @@ app.get("/profile", authenticateToken, async (req, res) => {
       "SELECT nom,email,solde FROM users WHERE id=$1",
       [req.user.id]
     );
+
     res.json(user.rows[0]);
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
-// Bouton Mon Profil
-const profileBtn = document.getElementById("profileBtn");
-const profileModal = document.getElementById("profileModal");
-const closeProfileModal = document.getElementById("closeProfileModal");
-
-// Afficher le pop-up Profil
-profileBtn.addEventListener("click", () => {
-  profileModal.style.display = "block";
-  loadProfileData(); // Charger les données du profil
-});
-
-// Fermer le pop-up Profil
-closeProfileModal.addEventListener("click", () => {
-  profileModal.style.display = "none";
-});
-
-// Si l'utilisateur clique en dehors du pop-up, fermer le modal
-window.addEventListener("click", (event) => {
-  if (event.target === profileModal) {
-    profileModal.style.display = "none";
-  }
-});
-
-// Charger les données du profil
-async function loadProfileData() {
-  const token = localStorage.getItem("token");
-  if (!token) {
-    alert("Veuillez vous connecter");
-    return;
-  }
-
-  const response = await fetch("https://wheely-dz-server.onrender.com/profile", {
-    headers: { Authorization: "Bearer " + token },
-  });
-
-  const data = await response.json();
-
-  if (response.ok) {
-    document.getElementById("profileContent").innerHTML = `
-      <p><strong>Nom:</strong> ${data.nom}</p>
-      <p><strong>Email:</strong> ${data.email}</p>
-      <p><strong>Solde:</strong> ${data.solde} DA</p>
-      <p><strong>Abonnement:</strong> ${data.subscription_type || "Aucun abonnement"}</p>
-      <p><strong>Minutes restantes:</strong> ${data.subscription_minutes_left || 0} min</p>
-    `;
-  } else {
-    alert("Erreur lors du chargement du profil");
-  }
-}
 
 /* ================= DEPOSIT ================= */
 
@@ -209,41 +171,45 @@ app.post("/deposit", authenticateToken, async (req, res) => {
   try {
     const { amount } = req.body;
 
+    if (!amount || amount <= 0)
+      return res.status(400).json({ error: "Montant invalide" });
+
     await pool.query(
-      "UPDATE users SET solde = solde + $1 WHERE id = $2",
+      "UPDATE users SET solde = solde + $1 WHERE id=$2",
       [amount, req.user.id]
     );
 
     res.json({ message: "Solde mis à jour" });
+
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
 
 /* ================= RESERVE ================= */
+
 app.post("/reserve", authenticateToken, async (req, res) => {
-  const { duration } = req.body;
+  try {
+    const { montant } = req.body;
 
-  if (!duration || duration <= 0) {
-    return res.status(400).json({ error: "Durée invalide" });
+    if (!montant || montant <= 0)
+      return res.status(400).json({ error: "Montant invalide" });
+
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+
+    await pool.query(
+      `INSERT INTO reservations (user_id, montant, code)
+       VALUES ($1,$2,$3)`,
+      [req.user.id, montant, code]
+    );
+
+    res.json({ code });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
-
-  const code = Math.floor(100000 + Math.random() * 900000).toString();
-
-  // Calculer le montant en fonction de la durée
-  let montant = 0;
-  if (duration === 70) montant = 70;  // 15 minutes
-  else if (duration === 150) montant = 150;  // 30 minutes
-  else if (duration === 220) montant = 220;  // 1 heure
-  else if (duration === 300) montant = 300;  // 2 heures
-
-  // Insérer la réservation avec le montant calculé
-  await pool.query(
-    `INSERT INTO reservations (user_id, montant, code) VALUES ($1, $2, $3)`,
-    [req.user.id, montant, code]
-  );
-
-  res.json({ code });
 });
 
 /* ================= UNLOCK ================= */
@@ -260,7 +226,9 @@ app.post("/unlock", authenticateToken, async (req, res) => {
     );
 
     res.json({ message: "Vélo déverrouillé 🚴" });
+
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -298,7 +266,9 @@ app.post("/end-ride", authenticateToken, async (req, res) => {
     );
 
     res.json({ duration });
+
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -306,6 +276,7 @@ app.post("/end-ride", authenticateToken, async (req, res) => {
 /* ================= START ================= */
 
 const PORT = process.env.PORT || 10000;
+
 app.listen(PORT, () => {
   console.log("Server running on port " + PORT);
 });
