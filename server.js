@@ -182,10 +182,13 @@ app.post("/reserve", authenticateToken, async (req, res) => {
   try {
     const code = Math.floor(100000 + Math.random() * 900000).toString();
 
+    // Ajouter un montant par défaut (exemple: 70 DA)
+    const montant = 70;  // Ou définis-le en fonction de la durée ou du plan de location
+
     await pool.query(
-      `INSERT INTO reservations (user_id,code)
-       VALUES ($1,$2)`,
-      [req.user.id, code]
+      `INSERT INTO reservations (user_id, montant, code)
+       VALUES ($1, $2, $3)`,
+      [req.user.id, montant, code]
     );
 
     res.json({ code });
