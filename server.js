@@ -40,7 +40,89 @@ app.get("/init-db", async (req, res) => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
 
+
+// ================= REGISTER =================
+app.post("/register", async (req, res) => {
+  try {
+    const { nom, email, telephone, password } = req.body;
+
+    if (!nom || !email || !password) {
+      return res.status(400).json({ error: "Champs obligatoires manquants" });
+    }
+
+    const userExist = await pool.query(
+      "SELECT * FROM users WHERE email = $1",
+      [email]
+    );
+
+    if (userExist.rows.length > 0) {
+      return res.status(400).json({ error: "Email déjà utilisé" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const newUser = await pool.query(
+      "INSERT INTO users (nom, email, telephone, password_hash) VALUES ($1, $2, $3, $4) RETURNING id, nom, email, solde, role",
+      [nom, email, telephone, hashedPassword]
+    );
+
+    res.status(201).json({
+      message: "Utilisateur créé ✅",
+      user: newUser.rows[0],
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
+// ================= LOGIN =================
+app.post("/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    const user = await pool.query(
+      "SELECT * FROM users WHERE email = $1",
+      [email]
+    );
+
+    if (user.rows.length === 0) {
+      return res.status(400).json({ error: "Utilisateur introuvable" });
+    }
+
+    const validPassword = await bcrypt.compare(
+      password,
+      user.rows[0].password_hash
+    );
+
+    if (!validPassword) {
+      return res.status(400).json({ error: "Mot de passe incorrect" });
+    }
+
+    const token = jwt.sign(
+      { id: user.rows[0].id, role: user.rows[0].role },
+      process.env.JWT_SECRET,
+      { expiresIn: "24h" }
+    );
+
+    res.json({
+      message: "Connexion réussie ✅",
+      token,
+      user: {
+        id: user.rows[0].id,
+        nom: user.rows[0].nom,
+        email: user.rows[0].email,
+        solde: user.rows[0].solde,
+        role: user.rows[0].role,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
     res.json({ message: "Users table created successfully ✅" });
   } catch (error) {
     res.status(500).json({ error: error.message });
