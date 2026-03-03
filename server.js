@@ -8,6 +8,9 @@ require("dotenv").config();
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.get("/", (req, res) => {
+  res.send("Wheely DZ API Running 🚴");
+});
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -330,4 +333,8 @@ app.post("/end-ride", authenticateToken, async (req, res) => {
   });
 });
 
-app.listen(process.env.PORT || 10000);
+aconst PORT = process.env.PORT || 10000;
+
+app.listen(PORT, () => {
+  console.log("Server running on port " + PORT);
+});
