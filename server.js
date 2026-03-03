@@ -49,6 +49,15 @@ app.get("/init-db", async (req, res) => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS reservations (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id),
+        amount INTEGER NOT NULL,
+        code VARCHAR(10) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    `);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS reservations (
@@ -187,10 +196,18 @@ app.post("/reserve", authenticateToken, async (req, res) => {
   try {
     const { montant } = req.body;
 
+    if (!montant || montant <= 0) {
+      return res.status(400).json({ error: "Montant invalide" });
+    }
+
     const user = await client.query(
       "SELECT solde FROM users WHERE id = $1",
       [req.user.id]
     );
+
+    if (user.rows.length === 0) {
+      return res.status(404).json({ error: "Utilisateur introuvable" });
+    }
 
     if (user.rows[0].solde < montant) {
       return res.status(400).json({ error: "Solde insuffisant" });
@@ -223,6 +240,49 @@ app.post("/reserve", authenticateToken, async (req, res) => {
 });
 
 const PORT = process.env.PORT || 10000;
+
+// ================= RESERVE =================
+app.post("/reserve", async (req, res) => {
+  try {
+    const token = req.headers.authorization?.split(" ")[1];
+    if (!token) return res.status(401).json({ error: "Non autorisé" });
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    const { amount } = req.body;
+
+    const user = await pool.query(
+      "SELECT * FROM users WHERE id = $1",
+      [decoded.id]
+    );
+
+    if (user.rows.length === 0)
+      return res.status(404).json({ error: "Utilisateur introuvable" });
+
+    if (user.rows[0].solde < amount)
+      return res.status(400).json({ error: "Solde insuffisant" });
+
+    // Déduire solde
+    const newSolde = user.rows[0].solde - amount;
+
+    await pool.query(
+      "UPDATE users SET solde = $1 WHERE id = $2",
+      [newSolde, decoded.id]
+    );
+
+    // Générer code 6 chiffres
+    const code = Math.floor(100000 + Math.random() * 900000);
+
+    res.json({
+      message: "Réservation confirmée ✅",
+      code,
+      newSolde
+    });
+
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 app.listen(PORT, () => {
   console.log("Server running on port " + PORT);
