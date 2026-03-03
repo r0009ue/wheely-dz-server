@@ -68,6 +68,10 @@ app.get("/init-db", async (req, res) => {
       ALTER TABLE reservations
       ADD COLUMN IF NOT EXISTS used BOOLEAN DEFAULT false;
     `);
+    await pool.query(`
+      ALTER TABLE reservations
+      ADD COLUMN IF NOT EXISTS started_at TIMESTAMP;
+      `);
 
     res.json({ message: "Tables prêtes ✅" });
 
@@ -263,7 +267,7 @@ app.post("/unlock", authenticateToken, async (req, res) => {
     }
 
     await pool.query(
-      "UPDATE reservations SET used = true WHERE id = $1",
+      "UPDATE reservations SET used = true, started_at = NOW() WHERE id = $1",
       [reservation.rows[0].id]
     );
 
@@ -314,6 +318,39 @@ app.get("/my-reservations", authenticateToken, async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+});
+app.post("/end-ride", authenticateToken, async (req, res) => {
+
+  try {
+
+    const ride = await pool.query(
+      `SELECT * FROM reservations 
+       WHERE user_id = $1 
+       AND used = true 
+       AND started_at IS NOT NULL
+       ORDER BY started_at DESC
+       LIMIT 1`,
+      [req.user.id]
+    );
+
+    if (ride.rows.length === 0)
+      return res.status(400).json({ error: "Aucune course active" });
+
+    const startTime = ride.rows[0].started_at;
+    const now = new Date();
+
+    const durationMinutes =
+      Math.floor((now - startTime) / 60000);
+
+    res.json({
+      message: "Course terminée",
+      duration: durationMinutes
+    });
+
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+
 });
 
 app.listen(PORT, () => {
