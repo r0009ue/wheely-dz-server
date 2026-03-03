@@ -218,20 +218,30 @@ app.post("/unlock", authenticateToken, async (req, res) => {
     }
 
     const reservation = await pool.query(
-      "SELECT * FROM reservations WHERE code = $1 AND user_id = $2",
+      `SELECT * FROM reservations 
+       WHERE code = $1 
+       AND user_id = $2 
+       AND used = false`,
       [code, req.user.id]
     );
 
     if (reservation.rows.length === 0) {
-      return res.status(400).json({ error: "Code invalide" });
+      return res.status(400).json({
+        error: "Code invalide ou déjà utilisé"
+      });
     }
 
-    res.json({ message: "Vélo déverrouillé 🚴" });
+    // Marquer comme utilisé
+    await pool.query(
+      "UPDATE reservations SET used = true WHERE id = $1",
+      [reservation.rows[0].id]
+    );
+
+    res.json({
+      message: "🚴 Vélo déverrouillé avec succès !"
+    });
 
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
-});
-app.listen(process.env.PORT || 10000, () => {
-  console.log("Server running");
 });
