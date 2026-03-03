@@ -51,11 +51,19 @@ app.get("/init-db", async (req, res) => {
         user_id INTEGER REFERENCES users(id),
         montant INTEGER NOT NULL,
         code VARCHAR(6),
+        used BOOLEAN DEFAULT false,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
 
-    res.json({ message: "Tables créées ✅" });
+    // 🔥 IMPORTANT SI TABLE DÉJÀ CRÉÉE
+    await pool.query(`
+      ALTER TABLE reservations
+      ADD COLUMN IF NOT EXISTS used BOOLEAN DEFAULT false;
+    `);
+
+    res.json({ message: "Tables mises à jour ✅" });
+
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
