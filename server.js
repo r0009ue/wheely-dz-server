@@ -69,6 +69,15 @@ app.get("/init-db", async (req, res) => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
+    await pool.query(`
+  ALTER TABLE reservations
+  ADD COLUMN IF NOT EXISTS started_at TIMESTAMP;
+`);
+
+await pool.query(`
+  ALTER TABLE reservations
+  ADD COLUMN IF NOT EXISTS ended_at TIMESTAMP;
+`);
 
     // Colonnes abonnement
     await pool.query(`
